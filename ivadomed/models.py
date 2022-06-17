@@ -1536,21 +1536,9 @@ class CNNClassifier(Module):
 
         modules = []
         if config_cnn is not None:
-            modules.append(CNN(
-                config_cnn["filters"], 
-                config_cnn["kernel_size"],
-                config_cnn["activation"],
-                config_mlp.get("norm_layer", None),
-                config_mlp.get("pool_layer", None),
-                config_mlp.get("pool_size", None),
-                config_mlp.get("pool_every", None),
-            ))
+            modules.append(CNN(**config_cnn))
         if config_mlp is not None:
-            modules.append(MLP(
-                config_mlp["neurons"],
-                config_mlp["activation"],
-                config_mlp.get("norm_layer", None),
-            ))
+            modules.append(MLP(**config_mlp))
         modules.append(nn.Flatten())
         modules.append(nn.LazyLinear(num_classes))
 
