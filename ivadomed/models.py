@@ -2,6 +2,7 @@ from collections import OrderedDict
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor
 from torch.nn import Module
 from torch.nn import init
 from pathlib import Path
@@ -1438,6 +1439,125 @@ class Countception(Module):
             net = self.conv6(net)
 
         return net
+
+
+class CNN(Module):
+    def __init__(self, filters, kernel_size, activation, norm_layer=None, pool_layer=None, pool_size = None, pool_every=None) -> None:
+        super().__init__()
+        kernel_dim = len(kernel_size)
+        conv_fun = eval(f"nn.LazyConv{kernel_dim}d")
+        if pool_layer is not None and pool_size is None:
+            pool_size = [2] * kernel_dim
+        if pool_layer is not None and pool_every is None:
+            pool_every = 1
+        
+        modules = []
+        for i, out_channels in enumerate(filters):
+            modules.append(conv_fun(out_channels, kernel_size))
+            if norm_layer is not None:
+                modules.append(norm_layer)
+            modules.append(activation)
+            if pool_layer is not None and not (i + 1) % pool_every:
+                modules.append(pool_layer)
+        
+        self.cnn = nn.Sequential(*modules)
+
+    def forward(self, x) -> Tensor:
+        return self.cnn(x)
+
+
+class MLP(Module):
+    def __init__(self, neurons, activation, norm_layer=None) -> None:
+        super().__init__()
+        modules = []
+        for out_features in neurons:
+            modules.append(nn.LazyLinear(out_features))
+            if norm_layer is not None:
+                modules.append(norm_layer)
+            modules.append(activation)
+        
+        self.mlp = nn.Sequential(*modules)
+
+    def forward(self, x):
+        return self.mlp(x)
+
+
+def instantiate_config(config):
+    # Load required config parameters
+    kernel_size = config.get("kernel_size", None)
+    pool_size = config.get("pool_size", None)
+    # Deduce dimension of kernels
+    norm_dim = 1 if kernel_size is None else kernel_size
+    pool_dim = norm_dim if pool_size is None else pool_size
+    
+    # Supported activations, normalizations and poolings
+    activations = {
+        "leaky_relu": f"nn.LeakyReLU",
+        "relu": f"nn.ReLU",
+        "hard_swish": f"nn.Hardswish",
+    }
+    normalizations = {
+        "batch": f"nn.BatchNorm{norm_dim}d",
+        "layer": f"nn.LayerNorm",
+        "batch": f"nn.InstanceNorm{norm_dim}d",
+    }
+    poolings = {
+        "max": f"MaxPool{pool_dim}d",
+        "avg": f"AvgPool{pool_dim}d",
+        "adaptive_max": f"AdaptiveMaxPool{pool_dim}d",
+        "adaptive_avg": f"AdaptiveAvgPool{pool_dim}d",
+    }
+
+    # Dev note: only instantiate the classes actually used in config
+    activation = config.get("activation", None)
+    if activation is not None:
+        config["activation"] = eval(activations[activation])()
+    norm_layer = config.get("norm_layer", None)
+    if norm_layer is not None:
+        config["norm_layer"] = eval(normalizations[norm_layer])()
+    pool_layer = config.get("pool_layer", None)
+    if pool_layer is not None:
+        config["pool_layer"] = eval(poolings[pool_layer])()
+
+    return config
+
+
+class CNNClassifier(Module):
+    def __init__(self, config):
+        super().__init__()
+        #TODO: validate CNN and MLP config once loaded
+        config_cnn = config.get("CNN", None)
+        config_mlp = config.get("MLP", None)
+        num_classes = config.get("num_classes", 2)
+
+        # Instantiate activation, normalization, pooling
+        config_cnn = instantiate_config(config_cnn)
+        config_mlp = instantiate_config(config_mlp)
+
+        modules = []
+        if config_cnn is not None:
+            modules.append(CNN(
+                config_cnn["filters"], 
+                config_cnn["kernel_size"],
+                config_cnn["activation"],
+                config_mlp.get("norm_layer", None),
+                config_mlp.get("pool_layer", None),
+                config_mlp.get("pool_size", None),
+                config_mlp.get("pool_every", None),
+            ))
+        if config_mlp is not None:
+            modules.append(MLP(
+                config_mlp["neurons"],
+                config_mlp["activation"],
+                config_mlp.get("norm_layer", None),
+            ))
+        modules.append(nn.Flatten())
+        modules.append(nn.LazyLinear(num_classes))
+
+        self.cnn_classifier = nn.Sequential(*modules)
+
+    def forward(self, x):
+        return self.cnn_classifier(x)
 
 
 def set_model_for_retrain(model_path, retrain_fraction, map_location, reset=True):
