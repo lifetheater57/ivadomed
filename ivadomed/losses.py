@@ -440,3 +440,14 @@ class LossCombination(nn.Module):
                 output.append(loss_class()(input, target).unsqueeze(0))
 
         return torch.sum(torch.cat(output))
+
+class KullbackLeiblerLoss(nn.Module):
+    def __init__(self):
+        super(KullbackLeiblerLoss, self).__init__()
+
+    #TODO: check equation validity
+    def forward(self, mu, log_var):
+        kl = torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
+        kl = torch.sum(kl, -1)
+        kl *= -0.5
+        return kl
