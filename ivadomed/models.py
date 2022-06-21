@@ -1537,9 +1537,9 @@ class CNNClassifier(Module):
         modules = []
         if config_cnn is not None:
             modules.append(CNN(**config_cnn))
+        modules.append(nn.Flatten())
         if config_mlp is not None:
             modules.append(MLP(**config_mlp))
-        modules.append(nn.Flatten())
         modules.append(nn.LazyLinear(num_classes))
 
         self.cnn_classifier = nn.Sequential(*modules)
