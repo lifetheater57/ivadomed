@@ -1446,18 +1446,18 @@ class CNN(Module):
         super().__init__()
         kernel_dim = len(kernel_size)
         conv_fun = eval(f"nn.LazyConv{kernel_dim}d")
-        if pool_layer is not None and pool_size is None:
+        if pool_layer and pool_size is None:
             pool_size = [2] * kernel_dim
-        if pool_layer is not None and pool_every is None:
+        if pool_layer and pool_every is None:
             pool_every = 1
         
         modules = []
         for i, out_channels in enumerate(filters):
             modules.append(conv_fun(out_channels, kernel_size))
-            if norm_layer is not None:
+            if norm_layer:
                 modules.append(norm_layer)
             modules.append(activation)
-            if pool_layer is not None and not (i + 1) % pool_every:
+            if pool_layer and not (i + 1) % pool_every:
                 modules.append(pool_layer)
         
         self.cnn = nn.Sequential(*modules)
@@ -1472,7 +1472,7 @@ class MLP(Module):
         modules = []
         for out_features in neurons:
             modules.append(nn.LazyLinear(out_features))
-            if norm_layer is not None:
+            if norm_layer:
                 modules.append(norm_layer)
             modules.append(activation)
         
@@ -1510,13 +1510,13 @@ def instantiate_config(config):
 
     # Dev note: only instantiate the classes actually used in config
     activation = config.get("activation", None)
-    if activation is not None:
+    if activation:
         config["activation"] = eval(activations[activation])()
     norm_layer = config.get("norm_layer", None)
-    if norm_layer is not None:
+    if norm_layer:
         config["norm_layer"] = eval(normalizations[norm_layer])()
     pool_layer = config.get("pool_layer", None)
-    if pool_layer is not None:
+    if pool_layer:
         config["pool_layer"] = eval(poolings[pool_layer])()
 
     return config
