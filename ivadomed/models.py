@@ -1442,6 +1442,7 @@ class Countception(Module):
 
 
 class CNN(Module):
+    #TODO: add stride
     def __init__(self, filters, kernel_size, activation, norm_layer=None, pool_layer=None, pool_size = None, pool_every=None) -> None:
         super().__init__()
         kernel_dim = len(kernel_size)

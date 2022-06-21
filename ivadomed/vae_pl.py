@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from torchvision.datasets import MNIST
 from typing import Type, Any, Callable, Union, List, Optional
+from models import CNN, MLP, instantiate_config
 
 from utils.model import outSizeCNN, genReLuCNN, genReLuCNNTranpose
 from losses import KullbackLeiblerLoss
@@ -71,38 +72,27 @@ class BasicBlock(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, filters, obs_channels, kernel, stride, flattened_dim, latent_dim):
+    def __init__(self, config):
         super().__init__()
-        # Note: kernel is currently unused
-        # Creation of the encoder's CNN
-        CNN_encoder = nn.Sequential()
-        for i in range(len(filters)):
-            in_channels = filters[i - 1] if i > 0 else obs_channels
-            out_channels = filters[i]
-            #TODO: add option to use BasicBlock
-            module = genReLuCNN(in_channels, out_channels, kernel, stride)
-            module_name = "enc_conv_relu" + str(i)
+        # TODO: validate CNN and MLP config once loaded
+        config_cnn = config.get("CNN", None)
+        config_mlp = config.get("MLP", None)
+        latent_dim = config.get("latent_dim", 2)
 
-            CNN_encoder.add_module(module_name, module)
+        # Instantiate activation, normalization, pooling
+        config_cnn = instantiate_config(config_cnn)
+        config_mlp = instantiate_config(config_mlp)
 
-        # Initialization of the layer on top of the CNN of the encoder 
-        # and its weights and biases
-        #TODO: add parameter list to set mlp layer sizes
-        encoder_linear_layer = nn.Linear(flattened_dim, 64)
-        nn.init.kaiming_normal_(encoder_linear_layer.weight, a=0.01, nonlinearity="leaky_relu")
-
-        # Creation of the encoder
-        #TODO: rename because encoder include the generation of mu and sigma
-        self.encoder = nn.Sequential(
-            CNN_encoder, 
-            nn.Flatten(), 
-            encoder_linear_layer,
-            #nn.BatchNorm1d(64),
-            nn.LeakyReLU()
-        )
+        modules = []
+        if config_cnn is not None:
+            modules.append(CNN(**config_cnn))
+        modules.append(nn.Flatten())
+        if config_mlp is not None:
+            modules.append(MLP(**config_mlp))
+        self.encoder = nn.Sequential(*modules)
 
         # Creation of the latent space mean and variance layers
-        self.mu = nn.Sequential(nn.Linear(64, latent_dim))
+        self.mu = nn.Sequential(nn.LazyLinear(latent_dim))
         self.log_var = nn.Sequential(nn.Linear(64, latent_dim))
 
     def forward(self, x):
@@ -177,8 +167,16 @@ class VAE(nn.Module):
         out_dims = outSizeCNN(in_dims, kernel, stride, len(filters))
         flattened_dims = filters[-1] * out_dims[-1, 0] * out_dims[-1, 1]
 
-        self.encoder = Encoder(filters, obs_channels, kernel, stride, flattened_dims, latent_dim)
-        self.decoder = Decoder(filters, obs_channels, kernel, stride, flattened_dims, latent_dim, out_dims)
+        self.encoder = Encoder(config["encoder"])
+        self.decoder = Decoder(
+            filters,
+            obs_channels,
+            kernel,
+            stride,
+            flattened_dims,
+            config["encoder"].get("latent_dim", 2),
+            out_dims,
+        )
 
     def forward(self, x):
         mu, log_var = self.encoder(x)
