@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from copy import deepcopy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -1484,9 +1485,10 @@ class MLP(Module):
 
 
 def instantiate_config(config):
+    config_local= deepcopy(config)
     # Load required config parameters
-    kernel_size = config.get("kernel_size", None)
-    pool_size = config.get("pool_size", None)
+    kernel_size = config_local.get("kernel_size", None)
+    pool_size = config_local.get("pool_size", None)
     # Deduce dimension of kernels
     norm_dim = 1 if kernel_size is None else kernel_size
     pool_dim = norm_dim if pool_size is None else pool_size
@@ -1510,17 +1512,17 @@ def instantiate_config(config):
     }
 
     # Dev note: only instantiate the classes actually used in config
-    activation = config.get("activation", None)
+    activation = config_local.get("activation", None)
     if activation:
-        config["activation"] = eval(activations[activation])()
-    norm_layer = config.get("norm_layer", None)
+        config_local["activation"] = eval(activations[activation])()
+    norm_layer = config_local.get("norm_layer", None)
     if norm_layer:
-        config["norm_layer"] = eval(normalizations[norm_layer])()
-    pool_layer = config.get("pool_layer", None)
+        config_local["norm_layer"] = eval(normalizations[norm_layer])()
+    pool_layer = config_local.get("pool_layer", None)
     if pool_layer:
-        config["pool_layer"] = eval(poolings[pool_layer])()
+        config_local["pool_layer"] = eval(poolings[pool_layer])()
 
-    return config
+    return config_local
 
 
 class CNNClassifier(Module):
