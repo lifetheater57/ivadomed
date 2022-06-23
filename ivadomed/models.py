@@ -1455,7 +1455,7 @@ class CNN(Module):
         pool_every=None,
         pool_offset=0,
     #TODO: add stride
-    def __init__(self, filters, kernel_size, activation, norm_layer=None, pool_layer=None, pool_size = None, pool_every=None) -> None:
+        padding=0,
     ) -> None:
         super().__init__()
         kernel_dim = len(kernel_size)
@@ -1467,7 +1467,11 @@ class CNN(Module):
         
         modules = []
         for i, out_channels in enumerate(filters):
-            modules.append(conv_fun(out_channels, kernel_size))
+            if padding:
+                pad = padding[i]
+            else:
+                pad = padding
+            modules.append(conv_fun(out_channels, kernel_size, padding=pad))
             if norm_layer:
                 modules.append(norm_layer)
             modules.append(activation)
