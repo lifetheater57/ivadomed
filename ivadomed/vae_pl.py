@@ -10,7 +10,7 @@ from torchvision.datasets import MNIST
 from typing import Type, Any, Callable, Union, List, Optional
 from models import CNN, MLP, instantiate_config
 
-from utils.model import outSizeCNN, genReLuCNN, genReLuCNNTranpose
+from utils.model import outSizeCNN
 from losses import KullbackLeiblerLoss
 
 
@@ -117,43 +117,68 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(
-        self, filters, obs_channels, kernel, stride, flattened_dim, latent_dim, out_dims
-    ):
+    def __init__(self, config, shape, decoder_config=False):
         super().__init__()
         # TODO: add sampling for output dimensions
-        # Creation of the decoder's CNN
-        CNN_decoder = nn.Sequential()
-        for i in reversed(range(len(filters))):
-            in_channels = filters[i]
-            out_channels = filters[i - 1] if i > 0 else obs_channels  # 2 * obs_channels
 
-            out_size = outSizeCNN(out_dims[i + 1], kernel, stride, transposed=True)[1]
-            output_padding = tuple(out_dims[i] - out_size)
-            # TODO: change this CNN by the TransposedBasicBlock
-            module = genReLuCNNTranpose(
-                in_channels, out_channels, kernel, stride, output_padding=output_padding
-            )
-            module_name = "dec_relu_conv" + str(len(filters) - i - 1)
+        # TODO: validate CNN and MLP config once loaded
+        config_cnn = config.get("CNN", None)
+        config_mlp = config.get("MLP", None)
 
-            CNN_decoder.add_module(module_name, module)
+        # Change CNN and MLP config to be reversed encoder
+        if not decoder_config:
+            # CNN
+            if config_cnn:
+                filters = config_cnn["filters"]
+                kernel = config_cnn["kernel_size"]
+                stride = config_cnn.get("stride", 1)
+                cnn_out_dims = outSizeCNN(shape[1:], kernel, stride, n=len(filters))
+                target_ctnn_out_dims = np.flip(cnn_out_dims, 0)
+                ctnn_out_dims = np.apply_along_axis(
+                    outSizeCNN,
+                    1,
+                    target_ctnn_out_dims,
+                    kernel,
+                    stride,
+                    n=1,
+                    transpose=True,
+                )[:, 1]
+                padding = list(
+                    map(tuple, target_ctnn_out_dims[1:] - ctnn_out_dims[:-1])
+                )
+                preflattened_dim = (
+                    filters[-1],
+                    int(cnn_out_dims[-1, 0]),
+                    int(cnn_out_dims[-1, 1]),
+                )
+                flattened_dim = filters[-1] * np.prod(cnn_out_dims[-1])
 
-        # Initialization of the layer on top of the CNN of the decoder
-        # and its weights and biases
-        decoder_linear_layer = nn.Linear(latent_dim, 64)
-        nn.init.kaiming_normal_(
-            decoder_linear_layer.weight, a=0.01, nonlinearity="leaky_relu"
-        )
+                # Update CNN config
+                config_cnn["filters"] = reversed(config_cnn["filters"])
+                config_cnn["padding"] = padding
+                config_cnn["transpose"] = True
+                if config_cnn.get("pool_every", None):
+                    config_cnn["pool_offset"] = len(filters) % config_cnn["pool_every"]
+            else:
+                preflattened_dim = shape
+                flattened_dim = np.prod(np.asarray(shape))
 
-        # Creation of the decoder
-        self.decoder = nn.Sequential(
-            decoder_linear_layer,
-            # nn.BatchNorm1d(64),
-            nn.LeakyReLU(),
-            nn.Linear(64, flattened_dim),
-            nn.Unflatten(1, (filters[-1], int(out_dims[-1, 0]), int(out_dims[-1, 1]))),
-            CNN_decoder,
-        )
+            # Update MLP config
+            if config_mlp:
+                config_mlp["neurons"] = reversed(config_mlp["neurons"])
+
+        # Instantiate activation, normalization, pooling
+        config_cnn = instantiate_config(config_cnn)
+        config_mlp = instantiate_config(config_mlp)
+
+        modules = []
+        if config_mlp is not None:
+            modules.append(MLP(**config_mlp))
+        modules.append(nn.LazyLinear(flattened_dim))
+        modules.append(nn.Unflatten(1, preflattened_dim))
+        if config_cnn is not None:
+            modules.append(CNN(**config_cnn))
+        self.decoder = nn.Sequential(*modules)
 
     def forward(self, x):
         return self.decoder(x)
@@ -161,32 +186,12 @@ class Decoder(nn.Module):
 
 class VAE(nn.Module):
     # TODO: check when to disconnect the gradient
-    def __init__(self, shape, config):
+    def __init__(self, config):
         super().__init__()
 
-        # Splitting shape
-        obs_channels, obs_height, obs_width = shape
-
-        # Initializing constant params
-        kernel = 4
-        stride = 2
-        filters = [32, 64]  # , 128]
-
         # Computing the dims required by the flattening and unflattening ops
-        in_dims = np.array([obs_height, obs_width])
-        out_dims = outSizeCNN(in_dims, kernel, stride, len(filters))
-        flattened_dims = filters[-1] * out_dims[-1, 0] * out_dims[-1, 1]
-
         self.encoder = Encoder(config["encoder"])
-        self.decoder = Decoder(
-            filters,
-            obs_channels,
-            kernel,
-            stride,
-            flattened_dims,
-            config["encoder"].get("latent_dim", 2),
-            out_dims,
-        )
+        self.decoder = Decoder(config["encoder"], config["shape"])
 
     def forward(self, x):
         mu, log_var = self.encoder(x)
