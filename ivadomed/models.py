@@ -1454,12 +1454,15 @@ class CNN(Module):
         pool_size=None,
         pool_every=None,
         pool_offset=0,
-    #TODO: add stride
+        transpose=False,
         padding=0,
     ) -> None:
         super().__init__()
         kernel_dim = len(kernel_size)
-        conv_fun = eval(f"nn.LazyConv{kernel_dim}d")
+        if transpose:
+            conv_fun = eval(f"nn.LazyConvTranspose{kernel_dim}d")
+        else:
+            conv_fun = eval(f"nn.LazyConv{kernel_dim}d")
         if pool_layer and pool_size is None:
             pool_size = [2] * kernel_dim
         if pool_layer and pool_every is None:
@@ -1522,9 +1525,12 @@ def instantiate_config(config):
     }
     poolings = {
         "max": f"MaxPool{pool_dim}d",
-        "avg": f"AvgPool{pool_dim}d",
-        "adaptive_max": f"AdaptiveMaxPool{pool_dim}d",
-        "adaptive_avg": f"AdaptiveAvgPool{pool_dim}d",
+        # "avg": f"AvgPool{pool_dim}d",
+        # "adaptive_max": f"AdaptiveMaxPool{pool_dim}d",
+        # "adaptive_avg": f"AdaptiveAvgPool{pool_dim}d",
+    }
+    unpoolings = {
+        "max": f"MaxUnpool{pool_dim}d",
     }
 
     # Dev note: only instantiate the classes actually used in config
@@ -1536,7 +1542,10 @@ def instantiate_config(config):
         config_local["norm_layer"] = eval(normalizations[norm_layer])()
     pool_layer = config_local.get("pool_layer", None)
     if pool_layer:
-        config_local["pool_layer"] = eval(poolings[pool_layer])()
+        if config_local.get("transpose", False):
+            config_local["pool_layer"] = eval(unpoolings[pool_layer])()
+        else:
+            config_local["pool_layer"] = eval(poolings[pool_layer])()
 
     return config_local
 
