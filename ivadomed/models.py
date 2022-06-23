@@ -1443,8 +1443,20 @@ class Countception(Module):
 
 
 class CNN(Module):
+    # TODO: add stride
+    def __init__(
+        self,
+        filters,
+        kernel_size,
+        activation,
+        norm_layer=None,
+        pool_layer=None,
+        pool_size=None,
+        pool_every=None,
+        pool_offset=0,
     #TODO: add stride
     def __init__(self, filters, kernel_size, activation, norm_layer=None, pool_layer=None, pool_size = None, pool_every=None) -> None:
+    ) -> None:
         super().__init__()
         kernel_dim = len(kernel_size)
         conv_fun = eval(f"nn.LazyConv{kernel_dim}d")
@@ -1459,7 +1471,7 @@ class CNN(Module):
             if norm_layer:
                 modules.append(norm_layer)
             modules.append(activation)
-            if pool_layer and not (i + 1) % pool_every:
+            if pool_layer and not (pool_offset + i + 1) % pool_every:
                 modules.append(pool_layer)
         
         self.cnn = nn.Sequential(*modules)
