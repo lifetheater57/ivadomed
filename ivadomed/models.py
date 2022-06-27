@@ -1,5 +1,6 @@
 from collections import OrderedDict
 from copy import deepcopy
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -1576,6 +1577,154 @@ class CNNClassifier(Module):
         return self.cnn_classifier(x)
 
 
+class VAEEncoder(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        # TODO: validate CNN and MLP config once loaded
+        config_cnn = config.get("CNN", None)
+        config_mlp = config.get("MLP", None)
+        latent_dim = config.get("latent_dim", 2)
+
+        # Instantiate activation, normalization, pooling
+        config_cnn = instantiate_config(config_cnn)
+        config_mlp = instantiate_config(config_mlp)
+
+        modules = []
+        if config_cnn is not None:
+            modules.append(CNN(**config_cnn))
+        modules.append(nn.Flatten())
+        if config_mlp is not None:
+            modules.append(MLP(**config_mlp))
+        self.encoder = nn.Sequential(*modules)
+
+        # Creation of the latent space mean and variance layers
+        self.mu = nn.Sequential(nn.LazyLinear(latent_dim))
+        self.log_var = nn.Sequential(nn.LazyLinear(latent_dim))
+
+    def forward(self, x):
+        # Encode the example
+        x = self.encoder(x)
+        # Get mean and variance of the latent variables for the example
+        mu = self.mu(x)
+        log_var = self.log_var(x)
+        return mu, log_var
+
+
+class VAEDecoder(nn.Module):
+    def __init__(self, config, shape, decoder_config=False):
+        super().__init__()
+        # TODO: add sampling for output dimensions
+
+        # TODO: validate CNN and MLP config once loaded
+        config_cnn = config.get("CNN", None)
+        config_mlp = config.get("MLP", None)
+
+        # Change CNN and MLP config to be reversed encoder
+        if not decoder_config:
+            # CNN
+            if config_cnn:
+                filters = config_cnn["filters"]
+                kernel = config_cnn["kernel_size"]
+                stride = config_cnn.get("stride", 1)
+                cnn_out_dims = out_size_CNN(shape[1:], kernel, stride, n=len(filters))
+                target_ctnn_out_dims = np.flip(cnn_out_dims, 0)
+                ctnn_out_dims = np.apply_along_axis(
+                    out_size_CNN,
+                    1,
+                    target_ctnn_out_dims,
+                    kernel,
+                    stride,
+                    n=1,
+                    transpose=True,
+                )[:, 1]
+                padding = list(
+                    map(tuple, target_ctnn_out_dims[1:] - ctnn_out_dims[:-1])
+                )
+                preflattened_dim = (
+                    filters[-1],
+                    int(cnn_out_dims[-1, 0]),
+                    int(cnn_out_dims[-1, 1]),
+                )
+                flattened_dim = filters[-1] * np.prod(cnn_out_dims[-1])
+
+                # Update CNN config
+                config_cnn["filters"] = reversed(config_cnn["filters"])
+                config_cnn["padding"] = padding
+                config_cnn["transpose"] = True
+                if config_cnn.get("pool_every", None):
+                    config_cnn["pool_offset"] = len(filters) % config_cnn["pool_every"]
+            else:
+                preflattened_dim = shape
+                flattened_dim = np.prod(np.asarray(shape))
+
+            # Update MLP config
+            if config_mlp:
+                config_mlp["neurons"] = reversed(config_mlp["neurons"])
+
+        # Instantiate activation, normalization, pooling
+        config_cnn = instantiate_config(config_cnn)
+        config_mlp = instantiate_config(config_mlp)
+
+        modules = []
+        if config_mlp is not None:
+            modules.append(MLP(**config_mlp))
+        modules.append(nn.LazyLinear(flattened_dim))
+        modules.append(nn.Unflatten(1, preflattened_dim))
+        if config_cnn is not None:
+            modules.append(CNN(**config_cnn))
+        self.decoder = nn.Sequential(*modules)
+
+    def forward(self, x):
+        return self.decoder(x)
+
+
+class VAE(nn.Module):
+    # TODO: check when to disconnect the gradient
+    def __init__(self, config):
+        super().__init__()
+
+        # Computing the dims required by the flattening and unflattening ops
+        self.encoder = VAEEncoder(config["encoder"])
+        self.decoder = VAEDecoder(config["encoder"], config["shape"])
+
+    def forward(self, x):
+        mu, log_var = self.encoder(x)
+        # Sample from the latent space
+        z = self.sample_latent_space(mu, log_var)
+        # Decode the sample
+        x_hat = self.decoder(z)
+
+        return x_hat, mu, log_var
+
+    def sample_latent_space(self, mu, log_var):
+        return mu + torch.mul(torch.exp(log_var / 2.0), torch.randn_like(log_var))
+
+    def encode(self, x, sample=True):
+        # Get mean and variance of the latent variables from the encoded example
+        mu, log_var = self.encoder(x)
+
+        if sample:
+            # Sample from the latent space
+            z = self.sample_latent_space(mu, log_var)
+            return z
+        else:
+            return mu, log_var
+
+    def decode(self, z, sample=False):
+        # Decode the sample
+        decoded = self.decoder(z)
+        if sample:
+            """# Get mean and variance of the output values from the decoded sample
+            mus = decoded[:, 0::2, :, :]
+            log_vars = decoded[:, 1::2, :, :]
+            # Sample from the parameters
+            sampled = self.sample_latent_space(mus, log_vars)
+            return sampled"""
+            pass
+        else:
+            return decoded
+
+
 def set_model_for_retrain(model_path, retrain_fraction, map_location, reset=True):
     """Set model for transfer learning.
 
@@ -1656,3 +1805,23 @@ def get_model_filenames(folder_model):
         raise FileNotFoundError(folder_model)
 
     return str(fname_model), str(fname_model_metadata)
+
+def out_size_CNN(
+    in_size, kernel_size, stride, n=1, transpose=False, output_padding=0
+):
+    # TODO: add pooling in dimension computations
+    # Initialize the size list
+    size_list = np.zeros((n + 1, len(kernel_size)))
+    # Set the first list element to the input size
+    size_list[0] = in_size
+
+    for i in np.arange(n) + 1:
+        # Set the output size of the current layer
+        if transpose:
+            size_list[i] = (
+                (size_list[i - 1] - 1) * stride + kernel_size + output_padding
+            )
+        else:
+            size_list[i] = np.floor((size_list[i - 1] - kernel_size) / stride + 1)
+
+    return size_list.astype(int)
