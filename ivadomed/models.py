@@ -1520,9 +1520,9 @@ def instantiate_config(config):
         "hard_swish": f"nn.Hardswish",
     }
     normalizations = {
-        "batch": f"nn.BatchNorm{norm_dim}d",
+        "batch": f"nn.LazyBatchNorm{norm_dim}d",
         "layer": f"nn.LayerNorm",
-        "batch": f"nn.InstanceNorm{norm_dim}d",
+        "instance": f"nn.LazyInstanceNorm{norm_dim}d",
     }
     poolings = {
         "max": f"MaxPool{pool_dim}d",
