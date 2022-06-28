@@ -1506,6 +1506,9 @@ class MLP(Module):
 
 def instantiate_config(config):
     config_local= deepcopy(config)
+    if config_local.get("norm_layer", None):
+        print("warning: normalization won't be supported until ivadomed upgrades its pytorch dependancy to torch>=1.9.0")
+        config_local["norm_layer"] = None
     # Load required config parameters
     kernel_size = config_local.get("kernel_size", None)
     pool_size = config_local.get("pool_size", None)
