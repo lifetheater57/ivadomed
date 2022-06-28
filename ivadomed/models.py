@@ -1510,8 +1510,8 @@ def instantiate_config(config):
     kernel_size = config_local.get("kernel_size", None)
     pool_size = config_local.get("pool_size", None)
     # Deduce dimension of kernels
-    norm_dim = 1 if kernel_size is None else kernel_size
-    pool_dim = norm_dim if pool_size is None else pool_size
+    norm_dim = 1 if kernel_size is None else len(kernel_size)
+    pool_dim = norm_dim if pool_size is None else len(pool_size)
     
     # Supported activations, normalizations and poolings
     activations = {
