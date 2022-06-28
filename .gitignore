@@ -34,3 +34,7 @@ data_multi_testing/
 
 # venv
 venv/
+
+# local
+lightning_logs/
+MNIST/
